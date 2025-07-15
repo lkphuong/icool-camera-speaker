@@ -1,0 +1,10 @@
+# Phụ thuộc cơ bản cho Socket
+pyaudio>=0.2.11
+
+# Phụ thuộc cho WebRTC (tùy chọn)
+aiortc>=1.6.0
+websockets>=11.0
+aiofiles>=23.0.0
+
+# Utility libraries
+numpy>=1.24.0
