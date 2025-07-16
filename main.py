@@ -121,7 +121,7 @@ async def main():
         await server.start()
     except KeyboardInterrupt:
         print("\n❌ Stopping server...")
-    finally:
+    finally: 
         server.cleanup()
 
 if __name__ == "__main__":
