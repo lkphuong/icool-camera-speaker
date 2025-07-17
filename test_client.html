@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Socket Speaker Test Client</title>
+</head>
+<body>
+    <h1>🎵 Socket Speaker Test Client</h1>
+    <button id="connectBtn">🔗 Kết nối</button>
+    <button id="pingBtn" disabled>📡 Test Ping</button>
+    <button id="testAudioBtn" disabled>🎵 Test Audio (Sine Wave)</button>
+    <button id="startMicBtn" disabled>🎤 Bắt đầu Mic</button>
+    <button id="stopMicBtn" disabled>⏹️ Dừng Mic</button>
+    <div id="status">Chưa kết nối</div>
+    <div id="logs"></div>
+
+    <script>
+        let websocket = null;
+        let mediaRecorder = null;
+        let audioContext = null;
+        let isRecording = false;
+        let processor = null;
+        const status = document.getElementById('status');
+        const logs = document.getElementById('logs');
+
+        function log(message) {
+            const div = document.createElement('div');
+            div.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+            logs.appendChild(div);
+            console.log(message);
+        }
+
+        function updateStatus(message) {
+            status.textContent = message;
+            log(message);
+        }
+
+        document.getElementById('connectBtn').onclick = () => {
+            try {
+                websocket = new WebSocket('ws://localhost:8765');
+                
+                websocket.onopen = () => {
+                    updateStatus('✅ Đã kết nối');
+                    document.getElementById('pingBtn').disabled = false;
+                    document.getElementById('testAudioBtn').disabled = false;
+                    document.getElementById('startMicBtn').disabled = false;
+                };
+
+                websocket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    log(`📨 Nhận: ${JSON.stringify(data)}`);
+                };
+
+                websocket.onclose = () => {
+                    updateStatus('❌ Đã ngắt kết nối');
+                    document.getElementById('pingBtn').disabled = true;
+                    document.getElementById('testAudioBtn').disabled = true;
+                    document.getElementById('startMicBtn').disabled = true;
+                    document.getElementById('stopMicBtn').disabled = true;
+                    stopMicrophone();
+                };
+
+                websocket.onerror = (error) => {
+                    updateStatus('❌ Lỗi kết nối');
+                    log(`Error: ${error}`);
+                };
+
+            } catch (error) {
+                updateStatus('❌ Không thể kết nối');
+                log(`Error: ${error}`);
+            }
+        };
+
+        document.getElementById('pingBtn').onclick = () => {
+            if (websocket?.readyState === WebSocket.OPEN) {
+                const payload = { type: 'ping' };
+                websocket.send(JSON.stringify(payload));
+                log(`📤 Gửi ping: ${JSON.stringify(payload)}`);
+            }
+        };
+
+        document.getElementById('testAudioBtn').onclick = () => {
+            if (websocket?.readyState === WebSocket.OPEN) {
+                // Tạo sine wave test audio (440Hz - note A4)
+                const sampleRate = 44100;
+                const frequency = 440;
+                const duration = 0.1; // 100ms
+                const samples = Math.floor(sampleRate * duration);
+                
+                // Tạo PCM 16-bit data
+                const buffer = new ArrayBuffer(samples * 2);
+                const view = new DataView(buffer);
+                
+                for (let i = 0; i < samples; i++) {
+                    const sample = Math.sin(2 * Math.PI * frequency * i / sampleRate);
+                    const pcmSample = Math.round(sample * 32767 * 0.5); // Giảm volume xuống 50%
+                    view.setInt16(i * 2, pcmSample, true); // little endian
+                }
+
+                // Convert to base64
+                const uint8Array = new Uint8Array(buffer);
+                let binary = '';
+                for (let i = 0; i < uint8Array.byteLength; i++) {
+                    binary += String.fromCharCode(uint8Array[i]);
+                }
+                const base64Data = btoa(binary);
+
+                const payload = {
+                    type: 'audio',
+                    data: base64Data
+                };
+
+                websocket.send(JSON.stringify(payload));
+                log(`📤 Gửi audio: ${samples} samples, ${buffer.byteLength} bytes, base64 length: ${base64Data.length}`);
+            }
+        };
+
+        // Microphone functions
+        async function startMicrophone() {
+            try {
+                log('🎤 Yêu cầu truy cập microphone...');
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        sampleRate: 44100,
+                        channelCount: 1,
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    } 
+                });
+
+                log('✅ Đã truy cập microphone');
+                audioContext = new AudioContext({ sampleRate: 44100 });
+                const source = audioContext.createMediaStreamSource(stream);
+                
+                // Tạo ScriptProcessorNode để xử lý audio real-time
+                processor = audioContext.createScriptProcessor(1024, 1, 1);
+                
+                processor.onaudioprocess = (event) => {
+                    if (isRecording && websocket?.readyState === WebSocket.OPEN) {
+                        const inputData = event.inputBuffer.getChannelData(0);
+                        sendAudioData(inputData);
+                    }
+                };
+
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                isRecording = true;
+                document.getElementById('startMicBtn').disabled = true;
+                document.getElementById('stopMicBtn').disabled = false;
+                updateStatus('🎤 Đang ghi âm từ microphone...');
+                
+            } catch (error) {
+                updateStatus('❌ Không thể truy cập microphone');
+                log(`Error: ${error.message}`);
+            }
+        }
+
+        function stopMicrophone() {
+            isRecording = false;
+            if (processor) {
+                processor.disconnect();
+                processor = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            document.getElementById('startMicBtn').disabled = false;
+            document.getElementById('stopMicBtn').disabled = true;
+            updateStatus('⏹️ Đã dừng ghi âm');
+            log('⏹️ Microphone stopped');
+        }
+
+        function sendAudioData(float32Array) {
+            // Convert Float32 to Int16 PCM
+            const int16Array = new Int16Array(float32Array.length);
+            for (let i = 0; i < float32Array.length; i++) {
+                int16Array[i] = Math.max(-32768, Math.min(32767, float32Array[i] * 32767));
+            }
+
+            // Convert to base64
+            const buffer = new ArrayBuffer(int16Array.length * 2);
+            const view = new DataView(buffer);
+            for (let i = 0; i < int16Array.length; i++) {
+                view.setInt16(i * 2, int16Array[i], true); // little endian
+            }
+
+            const uint8Array = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < uint8Array.byteLength; i++) {
+                binary += String.fromCharCode(uint8Array[i]);
+            }
+            const base64Data = btoa(binary);
+            
+            const payload = {
+                type: 'audio',
+                data: base64Data
+            };
+
+            websocket.send(JSON.stringify(payload));
+        }
+
+        // Event listeners
+        document.getElementById('startMicBtn').onclick = startMicrophone;
+        document.getElementById('stopMicBtn').onclick = stopMicrophone;
+
+        // Cleanup khi đóng trang
+        window.onbeforeunload = () => {
+            stopMicrophone();
+            if (websocket) {
+                websocket.close();
+            }
+        };
+    </script>
+</body>
+</html>
