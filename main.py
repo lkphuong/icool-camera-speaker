@@ -68,7 +68,7 @@ class AudioServer:
         print(f"🎯 Default Output Device: {default_output['name']} (ID: {default_output['index']})")
         print()
 
-    def is_ip_allowed(self, ip):
+    def f(self, ip):
         return True
         #return ip in self.allowed_ips
     
@@ -77,10 +77,10 @@ class AudioServer:
         client_ip = client_addr[0]
 
         origin = websocket.request_headers.get('Origin')
-        if not self.is_ip_allowed(client_ip):
-            print(f"❌ Client {client_addr} is not allowed")
-            await websocket.close(code=403, reason="Forbidden - IP not allowed")
-            return
+        # if not self.is_ip_allowed(client_ip):
+        #     print(f"❌ Client {client_addr} is not allowed")
+        #     await websocket.close(code=403, reason="Forbidden - IP not allowed")
+        #     return
 
         # if self.current_client is not None:
         #     print(f"❌ Rejecting client {client_addr} - another client is already connected")
