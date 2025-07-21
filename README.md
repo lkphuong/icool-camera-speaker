@@ -4,13 +4,13 @@ A WebSocket audio server built with TypeScript that receives audio data over Web
 
 ## Features
 
-- 🎵 Real-time audio streaming via WebSocket
-- 🔒 IP-based access control for security
-- 📝 Configurable logging with automatic log rotation
-- 🔧 Environment-based configuration
-- 🖥️ Windows service support for background operation
-- 🎛️ Configurable audio parameters (sample rate, channels, chunk size)
-- 📊 Connection monitoring and timeout handling
+- Real-time audio streaming via WebSocket
+- IP-based access control for security
+- Configurable logging with automatic log rotation
+- Environment-based configuration
+- Windows service support for background operation
+- Configurable audio parameters (sample rate, channels, chunk size)
+- Connection monitoring and timeout handling
 
 ## Prerequisites
 
