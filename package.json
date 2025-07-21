@@ -1,0 +1,36 @@
+{
+  "name": "audio-websocket-server",
+  "version": "1.0.0",
+  "description": "WebSocket audio server in TypeScript",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "ts-node src/main.ts",
+    "test-config": "ts-node src/test-config.ts",
+    "test-server-config": "ts-node src/test-server-config.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@types/dotenv": "^6.1.1",
+    "dotenv": "^16.6.1",
+    "node-wav": "^0.0.2",
+    "node-windows": "^1.0.0-beta.8",
+    "speaker": "^0.5.4",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/ws": "^8.5.10",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.3.2"
+  },
+  "keywords": [
+    "websocket",
+    "audio",
+    "server",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT"
+}
