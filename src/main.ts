@@ -13,7 +13,7 @@ import {
   isDebugEnabled,
   printConfig,
 } from "./config";
-import { setVolumeMac } from "./utils";
+import { setVolumeWindows } from "./utils";
 
 // Audio configuration from environment
 const CHUNK = audioConfig.chunkSize;
@@ -137,7 +137,7 @@ class AudioServer {
     const connectMessage = `Client connected: ${clientAddr}`;
 
     //#region open volume control
-    await setVolumeMac(100); // Set initial volume to 100% on macOS
+    await setVolumeWindows(100); // Set initial volume to 100% on Windows
     //#endregion
 
     console.log(connectMessage);
@@ -180,7 +180,7 @@ class AudioServer {
     });
 
     ws.on("close", (code: number, reason: Buffer) => {
-      setVolumeMac(0); // Mute volume on disconnect
+      setVolumeWindows(0); // Mute volume on disconnect
       const disconnectMessage = `Client ${clientAddr} disconnected`;
       console.log(disconnectMessage);
       this.logger.writeLog(disconnectMessage, "info");
@@ -191,7 +191,7 @@ class AudioServer {
     });
 
     ws.on("error", (error: Error) => {
-      setVolumeMac(0); // Mute volume on error
+      setVolumeWindows(0); // Mute volume on error
       const errorMessage = `Error with client ${clientAddr}: ${error}`;
       console.log(errorMessage);
       this.logger.writeLog(errorMessage, "error");
