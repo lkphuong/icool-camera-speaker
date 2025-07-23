@@ -49,7 +49,7 @@ class ConfigManager {
       audio: {
         chunkSize: parseInt(process.env.AUDIO_CHUNK_SIZE || "1024", 10),
         channels: parseInt(process.env.AUDIO_CHANNELS || "1", 10),
-        sampleRate: parseInt(process.env.AUDIO_SAMPLE_RATE || "44100", 10),
+        sampleRate: parseInt(process.env.AUDIO_SAMPLE_RATE || "48000", 10),
         sampleSize: parseInt(process.env.AUDIO_SAMPLE_SIZE || "16", 10),
       },
       logging: {

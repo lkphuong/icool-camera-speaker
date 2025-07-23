@@ -1,7 +1,7 @@
 import * as WebSocket from "ws";
 import { Server as WebSocketServer } from "ws";
 import { IncomingMessage } from "http";
-import Speaker = require("speaker");
+import { spawn, ChildProcess } from "child_process";
 import { Logger, writeLog } from "./log";
 import {
   audioConfig,
@@ -13,7 +13,7 @@ import {
   isDebugEnabled,
   printConfig,
 } from "./config";
-import { setVolumeWindows } from "./utils";
+import { setVolumeWindows, setVolumeMac } from "./utils";
 
 // Audio configuration from environment
 const CHUNK = audioConfig.chunkSize;
@@ -36,7 +36,7 @@ class AudioServer {
   private currentClient: WebSocket | null = null;
   private allowedIps: string[];
   private server: WebSocketServer | null = null;
-  private speaker: Speaker | null = null;
+  private ffplayProcess: ChildProcess | null = null;
   private logger: Logger;
 
   constructor(host?: string, port?: number, allowedIps?: string[]) {
@@ -58,13 +58,8 @@ class AudioServer {
 
   private initializeAudio(): void {
     try {
-      this.speaker = new Speaker({
-        channels: CHANNELS,
-        bitDepth: SAMPLE_SIZE,
-        sampleRate: RATE,
-      });
-
-      const message = "Audio output initialized successfully";
+      // ffplay will be spawned when needed for real-time audio playback
+      const message = "Audio output (ffplay) ready for initialization";
       console.log(message);
       this.logger.writeLog(message, "info");
 
@@ -82,7 +77,7 @@ class AudioServer {
   private logAudioDevices(): void {
     const deviceInfo = "Audio Device Information:";
     const separator = "-".repeat(50);
-    const speakerInfo = "Using Node.js Speaker module for audio output";
+    const speakerInfo = "Using ffplay for real-time audio output";
     const configInfo = `Configuration: ${CHANNELS} channel(s), ${RATE}Hz, ${SAMPLE_SIZE}-bit`;
 
     console.log(`\n${deviceInfo}`);
@@ -97,6 +92,98 @@ class AudioServer {
       `${deviceInfo} - ${speakerInfo} - ${configInfo}`,
       "info"
     );
+  }
+
+  private initializeFFPlay(): void {
+    try {
+      // Kill existing ffplay process if any
+      if (this.ffplayProcess) {
+        this.ffplayProcess.kill();
+        this.ffplayProcess = null;
+      }
+
+      // Log available audio devices first
+      console.log("🔊 === INITIALIZING FFPLAY ===");
+      console.log("🎧 Checking available audio devices...");
+
+      // Spawn ffplay process for real-time audio playbook
+      // Using stdin as input, with specified audio format
+      const args = [
+        "-f",
+        "s16le", // Input format: signed 16-bit little-endian
+        "-ar",
+        RATE.toString(), // Sample rate
+        "-i",
+        "pipe:0", // Read from stdin
+        "-nodisp", // No video display
+        "-autoexit", // Exit when input ends
+        "-af",
+        "volume=3.0", // Increase volume more
+        "-probesize",
+        "32", // Reduce probe size for lower latency
+        "-analyzeduration",
+        "0", // Skip analysis for lower latency
+        "-fflags",
+        "nobuffer", // Disable buffering
+        "-flags",
+        "low_delay", // Enable low delay mode
+        "-loglevel",
+        "info", // Show more info for debugging
+      ];
+
+      console.log("🎵 FFplay command:", "ffplay", args.join(" "));
+      console.log(
+        `🔊 Audio config: ${CHANNELS} channel(s), ${RATE}Hz, ${SAMPLE_SIZE}-bit`
+      );
+      console.log(
+        "🎧 NOTE: Audio will play through your default output device"
+      );
+      console.log("🎧 From audio check: Default is AirPod Pro");
+      console.log(
+        "🎧 If you want to hear through speakers, change default output in System Preferences"
+      );
+
+      this.ffplayProcess = spawn("ffplay", args);
+
+      if (this.ffplayProcess.stdin) {
+        const message =
+          "✅ FFplay process initialized successfully for real-time audio";
+        console.log(message);
+        this.logger.writeLog(message, "info");
+      }
+
+      // Capture stderr to see ffplay logs
+      if (this.ffplayProcess.stderr) {
+        this.ffplayProcess.stderr.on("data", (data) => {
+          console.log("🎧 FFplay stderr:", data.toString().trim());
+        });
+      }
+
+      // Capture stdout to see ffplay logs
+      if (this.ffplayProcess.stdout) {
+        this.ffplayProcess.stdout.on("data", (data) => {
+          console.log("🎵 FFplay stdout:", data.toString().trim());
+        });
+      }
+
+      this.ffplayProcess.on("error", (error) => {
+        const errorMessage = `❌ FFplay process error: ${error.message}`;
+        console.error(errorMessage);
+        this.logger.writeLog(errorMessage, "error");
+      });
+
+      this.ffplayProcess.on("exit", (code) => {
+        const exitMessage = `🔻 FFplay process exited with code: ${code}`;
+        console.log(exitMessage);
+        this.logger.writeLog(exitMessage, "info");
+        this.ffplayProcess = null;
+      });
+    } catch (error) {
+      const errorMessage = `❌ Error initializing FFplay: ${error}`;
+      console.error(errorMessage);
+      this.logger.writeLog(errorMessage, "error");
+      throw error;
+    }
   }
 
   private isIpAllowed(ip: string): boolean {
@@ -137,8 +224,16 @@ class AudioServer {
     const connectMessage = `Client connected: ${clientAddr}`;
 
     //#region open volume control
-    await setVolumeWindows(100); // Set initial volume to 100% on Windows
+    // Set volume for both platforms
+    if (process.platform === "darwin") {
+      await setVolumeMac(70); // Set macOS volume to 70%
+    } else {
+      await setVolumeWindows(100); // Set Windows volume to 100%
+    }
     //#endregion
+
+    // Initialize ffplay for this client session
+    this.initializeFFPlay();
 
     console.log(connectMessage);
     this.logger.writeLog(connectMessage, "info");
@@ -180,7 +275,19 @@ class AudioServer {
     });
 
     ws.on("close", (code: number, reason: Buffer) => {
-      setVolumeWindows(0); // Mute volume on disconnect
+      // Use Mac volume control on macOS
+      if (process.platform === "darwin") {
+        setVolumeMac(50); // Mute volume on disconnect
+      } else {
+        setVolumeWindows(0); // Mute volume on disconnect
+      }
+
+      // Stop ffplay process when client disconnects
+      if (this.ffplayProcess && !this.ffplayProcess.killed) {
+        this.ffplayProcess.kill();
+        this.ffplayProcess = null;
+      }
+
       const disconnectMessage = `Client ${clientAddr} disconnected`;
       console.log(disconnectMessage);
       this.logger.writeLog(disconnectMessage, "info");
@@ -192,6 +299,13 @@ class AudioServer {
 
     ws.on("error", (error: Error) => {
       setVolumeWindows(0); // Mute volume on error
+
+      // Stop ffplay process on error
+      if (this.ffplayProcess && !this.ffplayProcess.killed) {
+        this.ffplayProcess.kill();
+        this.ffplayProcess = null;
+      }
+
       const errorMessage = `Error with client ${clientAddr}: ${error}`;
       console.log(errorMessage);
       this.logger.writeLog(errorMessage, "error");
@@ -204,7 +318,7 @@ class AudioServer {
 
   private playAudio(audioData: Buffer): void {
     if (audioData.length === 0) {
-      const noDataMessage = "No audio data to play";
+      const noDataMessage = "⚠️ No audio data to play";
       console.log(noDataMessage);
       this.logger.writeLog(noDataMessage, "warn");
       return;
@@ -214,24 +328,66 @@ class AudioServer {
     const originalSize = audioData.length;
     let processedAudioData = audioData;
 
+    console.log(`🎵 === PLAYING AUDIO ===`);
+    console.log(`📊 Original audio data size: ${originalSize} bytes`);
+    console.log(`📊 Expected chunk size: ${expectedSize} bytes`);
+
     // Adjust audio data size
     if (audioData.length > expectedSize) {
       processedAudioData = audioData.subarray(0, expectedSize);
+      console.log(
+        `✂️ Trimmed audio data to ${processedAudioData.length} bytes`
+      );
     } else if (audioData.length < expectedSize) {
       const padding = Buffer.alloc(expectedSize - audioData.length);
       processedAudioData = Buffer.concat([audioData, padding]);
+      console.log(`🔧 Padded audio data to ${processedAudioData.length} bytes`);
     }
 
     try {
-      if (this.speaker && !this.speaker.destroyed) {
-        this.speaker.write(processedAudioData);
+      // Initialize ffplay if not already running
+      if (!this.ffplayProcess || this.ffplayProcess.killed) {
+        console.log("🔄 FFplay not running, initializing...");
+        this.initializeFFPlay();
+      }
+
+      if (
+        this.ffplayProcess &&
+        this.ffplayProcess.stdin &&
+        !this.ffplayProcess.stdin.destroyed
+      ) {
+        console.log(
+          `🎧 Writing ${processedAudioData.length} bytes to FFplay stdin`
+        );
+        const writeResult = this.ffplayProcess.stdin.write(processedAudioData);
+
+        // Force flush to reduce buffering delay
+        this.ffplayProcess.stdin.uncork();
+
+        console.log(`✅ FFplay stdin write result: ${writeResult}`);
+
+        // Log first few bytes of audio data for debugging
+        const firstBytes = processedAudioData.subarray(0, 16);
+        console.log(
+          `🔍 First 16 bytes of audio data:`,
+          Array.from(firstBytes)
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join(" ")
+        );
       } else {
-        const errorMessage = "Speaker not available or destroyed";
+        const errorMessage =
+          "❌ FFplay process not available or stdin destroyed";
         console.log(errorMessage);
+        console.log(`🔍 FFplay process status:`, {
+          exists: !!this.ffplayProcess,
+          killed: this.ffplayProcess?.killed,
+          stdinExists: !!this.ffplayProcess?.stdin,
+          stdinDestroyed: this.ffplayProcess?.stdin?.destroyed,
+        });
         this.logger.writeLog(errorMessage, "error");
       }
     } catch (error) {
-      const errorMessage = `Error playing audio: ${error}`;
+      const errorMessage = `❌ Error playing audio via ffplay: ${error}`;
       console.error(errorMessage);
       this.logger.writeLog(errorMessage, "error");
     }
@@ -305,9 +461,9 @@ class AudioServer {
       this.server = null;
     }
 
-    if (this.speaker && !this.speaker.destroyed) {
-      this.speaker.end();
-      this.speaker = null;
+    if (this.ffplayProcess && !this.ffplayProcess.killed) {
+      this.ffplayProcess.kill();
+      this.ffplayProcess = null;
     }
 
     console.log("Cleanup complete.");

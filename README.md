@@ -1,22 +1,51 @@
 # iCool Camera Speaker
 
-A WebSocket audio server built with TypeScript that receives audio data over WebSocket connections and plays it through system speakers. The application can be run as a Windows service for continuous operation.
+A WebSocket audio server built with TypeScript that receives audio data over WebSocket connections and plays it through system speakers using FFplay for real-time audio playback. The application can be run as a Windows service for continuous operation.
 
 ## Features
 
-- Real-time audio streaming via WebSocket
+- Real-time audio streaming via WebSocket using FFplay
 - IP-based access control for security
 - Configurable logging with automatic log rotation
 - Environment-based configuration
 - Windows service support for background operation
 - Configurable audio parameters (sample rate, channels, chunk size)
 - Connection monitoring and timeout handling
+- Low-latency audio playback with FFplay
 
 ## Prerequisites
 
 - Node.js (v14 or higher)
 - npm or yarn
+- **FFmpeg with FFplay** (required for audio playback)
 - Windows OS (for service functionality)
+
+## FFplay Installation
+
+### Windows
+
+1. Download FFmpeg from [https://ffmpeg.org/download.html#build-windows](https://ffmpeg.org/download.html#build-windows)
+2. Extract the archive and add the `bin` folder to your system PATH
+3. Verify installation: `ffplay -version`
+
+### macOS
+
+```bash
+brew install ffmpeg
+```
+
+### Linux (Ubuntu/Debian)
+
+```bash
+sudo apt update
+sudo apt install ffmpeg
+```
+
+### Verify FFplay Installation
+
+```bash
+npm run check-ffplay
+```
 
 ## Installation
 
@@ -74,6 +103,25 @@ npm run dev
 npm run build
 npm start
 ```
+
+### Testing with Test Client
+
+A test client is provided to verify FFplay integration:
+
+```bash
+# Start the server in one terminal
+npm run dev
+
+# In another terminal, run the test client
+node test-client.js
+```
+
+The test client will:
+
+- Connect to the WebSocket server
+- Generate a 440Hz sine wave (A4 note) for 2 seconds
+- Stream the audio data to the server
+- You should hear the tone through your speakers via FFplay
 
 ### Available Scripts
 
