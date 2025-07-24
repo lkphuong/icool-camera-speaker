@@ -1,17 +1,13 @@
 import { exec } from "child_process";
+import loudness from "loudness";
 
 export const setVolumeWindows = (volume: number) => {
   const vol = Math.max(0, Math.min(100, volume));
-  const command =
-    `powershell -Command "(New-Object -ComObject WScript.Shell).SendKeys([char]175)"`.repeat(
-      vol / 2
-    );
-
-  exec(command, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`Lỗi khi set âm lượng: ${error.message}`);
-    }
-  });
+  try {
+    loudness.setVolume(vol);
+  } catch (error) {
+    console.error(`Error setting volume on Windows: ${error}`);
+  }
 };
 
 export const setVolumeMac = (volume: number) => {

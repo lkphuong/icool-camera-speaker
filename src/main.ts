@@ -270,7 +270,7 @@ class AudioServer {
       if (process.platform === "darwin") {
         setVolumeMac(50); // Mute volume on disconnect
       } else {
-        setVolumeWindows(0); // Mute volume on disconnect
+        setVolumeWindows(1); // Mute volume on disconnect
       }
 
       // Stop ffplay process when client disconnects
@@ -289,7 +289,7 @@ class AudioServer {
     });
 
     ws.on("error", (error: Error) => {
-      setVolumeWindows(0); // Mute volume on error
+      setVolumeWindows(1); // Mute volume on error
 
       // Stop ffplay process on error
       if (this.ffplayProcess && !this.ffplayProcess.killed) {
