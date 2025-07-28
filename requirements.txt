@@ -14,3 +14,7 @@ pycaw>=20220416
 
 # Windows service support
 pywin32>=306
+
+# For building executable
+pyinstaller>=5.0
+setuptools>=65.0
