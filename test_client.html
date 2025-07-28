@@ -36,7 +36,7 @@
 
         document.getElementById('connectBtn').onclick = () => {
             try {
-                websocket = new WebSocket('ws://localhost:8765');
+                websocket = new WebSocket('http://localhost:8765');
                 
                 websocket.onopen = () => {
                     updateStatus('✅ Đã kết nối');

@@ -93,12 +93,12 @@ class AudioServer:
         try:
             async for message in websocket:
                 data = json.loads(message)
-                print(f"🔊 Received audio data from {client_addr}")
-                print(f"🔊 Message from {client_addr}: {data}")
+                #print(f"🔊 Received audio data from {client_addr}")
+                #print(f"🔊 Message from {client_addr}: {data}")
                 if data.get("type") == "audio":
                     audio_b64 = data.get("data", "")
-                    print("🔊 Processing audio data ", audio_b64)
-                    print(f"🔊 Received audio data from {client_addr}")
+                    # print("🔊 Processing audio data ", audio_b64)
+                    # print(f"🔊 Received audio data from {client_addr}")
                     if audio_b64:
                         audio_data = base64.b64decode(audio_b64)
                         self.play_audio(audio_data)
