@@ -48,10 +48,19 @@ class AudioServer:
         # Setup logging
         self.setup_logging()
         
+        # Check volume control requirements
+        volume_requirements_met = self.check_volume_requirements()
+        
         # Setup volume control
         self.volume_endpoint = None
-        if VOLUME_CONTROL_AVAILABLE:
+        if volume_requirements_met:
             self.setup_volume_control()
+            if self.volume_endpoint:
+                self.logger.info("Volume control fully initialized and tested")
+            else:
+                self.logger.warning("Volume control initialization failed - continuing without volume control")
+        else:
+            self.logger.info("Volume control requirements not met - continuing without volume control")
 
         # Initialize audio output
         self.p = pyaudio.PyAudio()
@@ -169,81 +178,124 @@ class AudioServer:
     def setup_volume_control(self):
         """Setup Windows volume control"""
         if not VOLUME_CONTROL_AVAILABLE:
+            self.logger.info("Volume control not available (not Windows or pycaw not installed)")
             return
             
         try:
-            # Initialize COM if not already done
+            # Ensure COM is initialized for this thread
+            try:
+                CoInitialize()
+                self.logger.debug("COM initialized for volume control")
+            except Exception as com_error:
+                self.logger.debug(f"COM already initialized or error: {com_error}")
+            
+            # Try to get speakers
+            devices = AudioUtilities.GetSpeakers()
+            if devices is None:
+                self.logger.error("No speaker devices found for volume control")
+                return
+                
+            # Get the audio endpoint volume interface
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            if interface is None:
+                self.logger.error("Failed to activate audio endpoint volume interface")
+                return
+                
+            self.volume_endpoint = cast(interface, POINTER(IAudioEndpointVolume))
+            
+            # Test the volume interface with multiple attempts
+            test_attempts = 3
+            for attempt in range(test_attempts):
+                try:
+                    current_volume = self.volume_endpoint.GetMasterScalarVolume()
+                    self.logger.info(f"Volume control initialized successfully. Current volume: {current_volume * 100:.1f}%")
+                    
+                    # Test setting volume (to current level, no actual change)
+                    self.volume_endpoint.SetMasterScalarVolume(current_volume, None)
+                    self.logger.info("Volume control test successful")
+                    return
+                    
+                except Exception as test_error:
+                    self.logger.warning(f"Volume control test attempt {attempt + 1} failed: {test_error}")
+                    if attempt < test_attempts - 1:
+                        import time
+                        time.sleep(0.1)  # Small delay before retry
+                    continue
+            
+            # If we get here, all test attempts failed
+            self.logger.error("All volume control test attempts failed")
+            self.volume_endpoint = None
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize volume control: {e}")
+            self.logger.error(f"Volume control will be disabled")
+            self.volume_endpoint = None
+
+    def get_volume(self):
+        """Get current system volume (0-100%)"""
+        if not VOLUME_CONTROL_AVAILABLE:
+            return None
+            
+        if not self.volume_endpoint:
+            # Try to reinitialize volume control
+            self.setup_volume_control()
+            if not self.volume_endpoint:
+                return None
+        
+        try:
+            # Ensure COM is initialized for this thread
             try:
                 CoInitialize()
             except:
                 pass  # COM might already be initialized
                 
-            devices = AudioUtilities.GetSpeakers()
-            if devices is None:
-                self.logger.error("No audio devices found")
-                return
-                
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            self.volume_endpoint = cast(interface, POINTER(IAudioEndpointVolume))
-            
-            # Test the volume interface
-            current_volume = self.volume_endpoint.GetMasterScalarVolume()
-            self.logger.info(f"Volume control initialized successfully. Current volume: {current_volume * 100:.1f}%")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to initialize volume control: {e}")
-            self.volume_endpoint = None
-    
-    def set_volume(self, volume_percent):
-        """Set system volume (0-100%)"""
-        if not VOLUME_CONTROL_AVAILABLE or not self.volume_endpoint:
-            self.logger.debug(f"Volume control not available, cannot set volume to {volume_percent}%")
-            return False
-        
-        try:
-            # Clamp volume between 0 and 100
-            volume_percent = max(0, min(100, volume_percent))
-            volume_level = volume_percent / 100.0
-            
-            # Use the correct method for setting volume
-            self.volume_endpoint.SetMasterScalarVolume(volume_level, None)
-            
-            # Verify the volume was set
-            actual_volume = self.volume_endpoint.GetMasterScalarVolume()
-            actual_percent = actual_volume * 100
-            
-            self.logger.info(f"Volume set to {volume_percent}% (actual: {actual_percent:.1f}%)")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to set volume to {volume_percent}%: {e}")
-            
-            # Try alternative approach using AudioSession
-            try:
-                self.logger.info("Trying alternative volume control method...")
-                sessions = AudioUtilities.GetAllSessions()
-                for session in sessions:
-                    if session.Process and session.Process.name() == "python.exe":
-                        volume_interface = session.SimpleAudioVolume
-                        volume_interface.SetMasterVolume(volume_level, None)
-                        self.logger.info(f"Alternative method: Volume set to {volume_percent}%")
-                        return True
-            except Exception as e2:
-                self.logger.error(f"Alternative volume control also failed: {e2}")
-            
-            return False
-
-    def get_volume(self):
-        """Get current system volume (0-100%)"""
-        if not VOLUME_CONTROL_AVAILABLE or not self.volume_endpoint:
-            return None
-        
-        try:
             volume_level = self.volume_endpoint.GetMasterScalarVolume()
             return int(volume_level * 100)
+            
         except Exception as e:
             self.logger.error(f"Failed to get volume: {e}")
+            
+            # Try to reinitialize and get volume again
+            try:
+                self.logger.debug("Attempting to reinitialize volume control for get_volume")
+                self.setup_volume_control()
+                if self.volume_endpoint:
+                    volume_level = self.volume_endpoint.GetMasterScalarVolume()
+                    return int(volume_level * 100)
+            except Exception as e2:
+                self.logger.debug(f"Volume reinitialize failed: {e2}")
+                
             return None
+
+    def is_admin(self):
+        """Check if running as administrator on Windows"""
+        if platform.system() != "Windows":
+            return True  # Not applicable on non-Windows systems
+            
+        try:
+            import ctypes
+            return ctypes.windll.shell32.IsUserAnAdmin()
+        except Exception:
+            return False
+
+    def check_volume_requirements(self):
+        """Check if all requirements for volume control are met"""
+        if not VOLUME_CONTROL_AVAILABLE:
+            self.logger.warning("Volume control requirements not met:")
+            self.logger.warning("  - pycaw library not installed")
+            self.logger.warning("  - Install with: pip install pycaw comtypes")
+            return False
+            
+        if platform.system() != "Windows":
+            self.logger.info("Volume control only available on Windows")
+            return False
+            
+        if not self.is_admin():
+            self.logger.warning("Volume control may require Administrator privileges")
+            self.logger.warning("  - Try running as Administrator for full volume control")
+            # Don't return False here as it might still work
+            
+        return True
 
     def log_audio_devices(self):
         """Log thông tin về tất cả audio devices có sẵn"""
@@ -293,14 +345,18 @@ class AudioServer:
         self.logger.info(f"Client connected: {client_addr}")
         self.current_client = websocket
         
-        # Set volume to 100% when client connects
+        # Try to set volume to 100% when client connects
         current_volume = self.get_volume()
         if current_volume is not None:
             self.logger.info(f"Current system volume: {current_volume}%")
+        else:
+            self.logger.info("Cannot read current system volume")
         
-        success = self.set_volume(100)
-        if not success:
-            self.logger.warning("Failed to set volume to 100% - continuing without volume control")
+        # Volume control is available but set_volume function has been removed
+        if self.volume_endpoint:
+            self.logger.info("Volume control available - audio will play at current system volume level")
+        else:
+            self.logger.info("Volume control not available - audio will play at current system volume level")
 
         try:
             async for message in websocket:
@@ -324,9 +380,12 @@ class AudioServer:
             self.logger.error(f"Error handling client {client_addr}: {error}")
         finally:
             self.current_client = None
-            # Set volume to 0% when client disconnects
-            self.set_volume(0)
-            self.logger.info(f"Client {client_addr} has been reset")
+            # Volume control cleanup section removed (set_volume function deleted)
+            if self.volume_endpoint:
+                self.logger.debug("Volume control available for disconnect cleanup but set_volume function removed")
+            else:
+                self.logger.debug("Volume control not available for disconnect cleanup")
+            self.logger.info(f"Client {client_addr} session ended")
 
     def play_audio(self, audio_data):
         if len(audio_data) == 0:
@@ -409,8 +468,9 @@ class AudioServer:
 
     def cleanup(self):
         self.logger.info("Cleaning up...")
-        # Set volume to 0% on cleanup
-        self.set_volume(0)
+        # Volume cleanup section removed (set_volume function deleted)
+        if self.volume_endpoint:
+            self.logger.debug("Volume control available during cleanup but set_volume function removed")
         
         if hasattr(self, 'stream'):
             self.stream.stop_stream()
@@ -422,6 +482,7 @@ class AudioServer:
         if platform.system() == "Windows" and VOLUME_CONTROL_AVAILABLE:
             try:
                 CoUninitialize()
+                self.logger.debug("COM cleanup completed")
             except Exception as e:
                 self.logger.debug(f"COM cleanup warning: {e}")
                 
