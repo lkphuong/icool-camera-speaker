@@ -12,15 +12,18 @@ import platform
 # Volume control imports
 if platform.system() == "Windows":
     try:
-        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-        from comtypes import CLSCTX_ALL
+        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume, AudioSession
+        from comtypes import CLSCTX_ALL, CoInitialize, CoUninitialize
         from ctypes import cast, POINTER
+        import comtypes
         VOLUME_CONTROL_AVAILABLE = True
-    except ImportError:
+        print("Windows volume control available")
+    except ImportError as e:
         VOLUME_CONTROL_AVAILABLE = False
-        print("pycaw not available - volume control disabled")
+        print(f"pycaw not available - volume control disabled: {e}")
 else:
     VOLUME_CONTROL_AVAILABLE = False
+    print("Volume control only available on Windows")
 
 # Configuration for audio
 CHUNK = 1024
@@ -34,6 +37,13 @@ class AudioServer:
         self.port = port
         self.current_client = None
         self.allowed_ips = allowed_ips or ["127.0.0.1", "::1", "localhost"]
+        
+        # Initialize COM for Windows volume control
+        if platform.system() == "Windows" and VOLUME_CONTROL_AVAILABLE:
+            try:
+                CoInitialize()
+            except Exception as e:
+                print(f"Warning: COM initialization failed: {e}")
         
         # Setup logging
         self.setup_logging()
@@ -50,16 +60,26 @@ class AudioServer:
         self.log_audio_devices()
         
         try:
+            # Get the default output device for Windows
+            if platform.system() == "Windows":
+                device_index = self.get_best_output_device()
+            else:
+                device_index = None
+                
             self.stream = self.p.open(
                 format=FORMAT,
                 channels=CHANNELS,
                 rate=RATE,
                 output=True,
-                frames_per_buffer=CHUNK
+                frames_per_buffer=CHUNK,
+                output_device_index=device_index
             )
             
             # Log the device being used
-            device_info = self.p.get_default_output_device_info()
+            if device_index is not None:
+                device_info = self.p.get_device_info_by_index(device_index)
+            else:
+                device_info = self.p.get_default_output_device_info()
             self.logger.info(f"Audio output initialized on device: {device_info['name']} (Device ID: {device_info['index']})")
             
         except Exception as error:
@@ -122,13 +142,54 @@ class AudioServer:
         except Exception as e:
             print(f"Error during log cleanup: {e}")
     
+    def get_best_output_device(self):
+        """Find the best output device for Windows"""
+        try:
+            device_count = self.p.get_device_count()
+            default_device = self.p.get_default_output_device_info()
+            
+            # First, try to use the default device
+            if default_device['maxOutputChannels'] > 0:
+                return default_device['index']
+            
+            # If default doesn't work, find any device with output channels
+            for i in range(device_count):
+                try:
+                    info = self.p.get_device_info_by_index(i)
+                    if info['maxOutputChannels'] > 0:
+                        return i
+                except:
+                    continue
+                    
+            return None
+        except Exception as e:
+            self.logger.error(f"Error finding output device: {e}")
+            return None
+    
     def setup_volume_control(self):
         """Setup Windows volume control"""
+        if not VOLUME_CONTROL_AVAILABLE:
+            return
+            
         try:
+            # Initialize COM if not already done
+            try:
+                CoInitialize()
+            except:
+                pass  # COM might already be initialized
+                
             devices = AudioUtilities.GetSpeakers()
+            if devices is None:
+                self.logger.error("No audio devices found")
+                return
+                
             interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
             self.volume_endpoint = cast(interface, POINTER(IAudioEndpointVolume))
-            self.logger.info("Volume control initialized successfully")
+            
+            # Test the volume interface
+            current_volume = self.volume_endpoint.GetMasterScalarVolume()
+            self.logger.info(f"Volume control initialized successfully. Current volume: {current_volume * 100:.1f}%")
+            
         except Exception as e:
             self.logger.error(f"Failed to initialize volume control: {e}")
             self.volume_endpoint = None
@@ -136,31 +197,53 @@ class AudioServer:
     def set_volume(self, volume_percent):
         """Set system volume (0-100%)"""
         if not VOLUME_CONTROL_AVAILABLE or not self.volume_endpoint:
-            return
+            self.logger.debug(f"Volume control not available, cannot set volume to {volume_percent}%")
+            return False
         
         try:
+            # Clamp volume between 0 and 100
+            volume_percent = max(0, min(100, volume_percent))
             volume_level = volume_percent / 100.0
             
-            # Try different methods based on pycaw version
-            if hasattr(self.volume_endpoint, 'SetMasterScalarVolume'):
-                self.volume_endpoint.SetMasterScalarVolume(volume_level, None)
-            elif hasattr(self.volume_endpoint, 'SetMasterVolume'):
-                self.volume_endpoint.SetMasterVolume(volume_level, None)
-            else:
-                # Fallback method
-                self.volume_endpoint.contents.SetMasterScalarVolume(volume_level, None)
-                
-            self.logger.info(f"Volume set to {volume_percent}%")
+            # Use the correct method for setting volume
+            self.volume_endpoint.SetMasterScalarVolume(volume_level, None)
+            
+            # Verify the volume was set
+            actual_volume = self.volume_endpoint.GetMasterScalarVolume()
+            actual_percent = actual_volume * 100
+            
+            self.logger.info(f"Volume set to {volume_percent}% (actual: {actual_percent:.1f}%)")
+            return True
+            
         except Exception as e:
-            self.logger.error(f"Failed to set volume: {e}")
-            # Try alternative approach
+            self.logger.error(f"Failed to set volume to {volume_percent}%: {e}")
+            
+            # Try alternative approach using AudioSession
             try:
-                from pycaw.pycaw import AudioSession
-                sessions = AudioSession.GetAllSessions()
+                self.logger.info("Trying alternative volume control method...")
+                sessions = AudioUtilities.GetAllSessions()
                 for session in sessions:
-                    session.SimpleAudioVolume.SetMasterVolume(volume_level, None)
+                    if session.Process and session.Process.name() == "python.exe":
+                        volume_interface = session.SimpleAudioVolume
+                        volume_interface.SetMasterVolume(volume_level, None)
+                        self.logger.info(f"Alternative method: Volume set to {volume_percent}%")
+                        return True
             except Exception as e2:
                 self.logger.error(f"Alternative volume control also failed: {e2}")
+            
+            return False
+
+    def get_volume(self):
+        """Get current system volume (0-100%)"""
+        if not VOLUME_CONTROL_AVAILABLE or not self.volume_endpoint:
+            return None
+        
+        try:
+            volume_level = self.volume_endpoint.GetMasterScalarVolume()
+            return int(volume_level * 100)
+        except Exception as e:
+            self.logger.error(f"Failed to get volume: {e}")
+            return None
 
     def log_audio_devices(self):
         """Log thông tin về tất cả audio devices có sẵn"""
@@ -211,7 +294,13 @@ class AudioServer:
         self.current_client = websocket
         
         # Set volume to 100% when client connects
-        self.set_volume(100)
+        current_volume = self.get_volume()
+        if current_volume is not None:
+            self.logger.info(f"Current system volume: {current_volume}%")
+        
+        success = self.set_volume(100)
+        if not success:
+            self.logger.warning("Failed to set volume to 100% - continuing without volume control")
 
         try:
             async for message in websocket:
@@ -253,18 +342,56 @@ class AudioServer:
             audio_data += b'\x00' * (expected_size - len(audio_data))
 
         try:
-            # Get current device info
-            device_info = self.p.get_default_output_device_info()
+            # Check if stream is still active
+            if not self.stream.is_active():
+                self.logger.warning("Audio stream is not active, attempting to restart...")
+                self.stream.start_stream()
             
-            # Log audio playback details
-            self.logger.debug(f"Playing audio on: {device_info['name']} (Device ID: {device_info['index']})")
+            # Get current device info for logging
+            try:
+                if hasattr(self.stream, '_output_device_index') and self.stream._output_device_index is not None:
+                    device_info = self.p.get_device_info_by_index(self.stream._output_device_index)
+                else:
+                    device_info = self.p.get_default_output_device_info()
+                
+                self.logger.debug(f"Playing audio on: {device_info['name']} (Device ID: {device_info['index']})")
+            except Exception as e:
+                self.logger.debug(f"Could not get device info: {e}")
+            
             self.logger.debug(f"Audio stats: Original={original_size} bytes, Processed={len(audio_data)} bytes, Expected={expected_size} bytes")
             
+            # Write audio data to stream
             self.stream.write(audio_data)
             self.logger.debug("Audio played successfully")
             
         except Exception as e:
             self.logger.error(f"Error playing audio: {e}")
+            # Try to recover by recreating the stream
+            try:
+                self.logger.info("Attempting to recover audio stream...")
+                self.stream.stop_stream()
+                self.stream.close()
+                
+                # Recreate stream
+                device_index = None
+                if platform.system() == "Windows":
+                    device_index = self.get_best_output_device()
+                
+                self.stream = self.p.open(
+                    format=FORMAT,
+                    channels=CHANNELS,
+                    rate=RATE,
+                    output=True,
+                    frames_per_buffer=CHUNK,
+                    output_device_index=device_index
+                )
+                
+                # Try playing again
+                self.stream.write(audio_data)
+                self.logger.info("Audio stream recovered and audio played successfully")
+                
+            except Exception as recovery_error:
+                self.logger.error(f"Failed to recover audio stream: {recovery_error}")
 
     async def start(self):
         self.logger.info(f"Simple Audio Server starting at ws://{self.host}:{self.port}")
@@ -290,6 +417,14 @@ class AudioServer:
             self.stream.close()
         if hasattr(self, 'p'):
             self.p.terminate()
+            
+        # Cleanup COM for Windows
+        if platform.system() == "Windows" and VOLUME_CONTROL_AVAILABLE:
+            try:
+                CoUninitialize()
+            except Exception as e:
+                self.logger.debug(f"COM cleanup warning: {e}")
+                
         self.logger.info("Cleanup complete.")
 
 async def main():
