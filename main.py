@@ -140,10 +140,27 @@ class AudioServer:
         
         try:
             volume_level = volume_percent / 100.0
-            self.volume_endpoint.SetMasterVolume(volume_level, None)
+            
+            # Try different methods based on pycaw version
+            if hasattr(self.volume_endpoint, 'SetMasterScalarVolume'):
+                self.volume_endpoint.SetMasterScalarVolume(volume_level, None)
+            elif hasattr(self.volume_endpoint, 'SetMasterVolume'):
+                self.volume_endpoint.SetMasterVolume(volume_level, None)
+            else:
+                # Fallback method
+                self.volume_endpoint.contents.SetMasterScalarVolume(volume_level, None)
+                
             self.logger.info(f"Volume set to {volume_percent}%")
         except Exception as e:
             self.logger.error(f"Failed to set volume: {e}")
+            # Try alternative approach
+            try:
+                from pycaw.pycaw import AudioSession
+                sessions = AudioSession.GetAllSessions()
+                for session in sessions:
+                    session.SimpleAudioVolume.SetMasterVolume(volume_level, None)
+            except Exception as e2:
+                self.logger.error(f"Alternative volume control also failed: {e2}")
 
     def log_audio_devices(self):
         """Log thông tin về tất cả audio devices có sẵn"""
