@@ -1,0 +1,38 @@
+2025-07-28 09:42:07,883 - INFO - Available Audio Devices:
+2025-07-28 09:42:07,883 - INFO - --------------------------------------------------
+2025-07-28 09:42:07,883 - INFO -   [0] OUTPUT 
+2025-07-28 09:42:07,884 - INFO -       Name: LG FULL HD
+2025-07-28 09:42:07,884 - INFO -       Max Channels: In=0, Out=2
+2025-07-28 09:42:07,884 - INFO -       Sample Rate: 48000.0
+2025-07-28 09:42:07,884 - INFO -   [1] INPUT 
+2025-07-28 09:42:07,884 - INFO -       Name: AirPod Pro
+2025-07-28 09:42:07,884 - INFO -       Max Channels: In=1, Out=0
+2025-07-28 09:42:07,884 - INFO -       Sample Rate: 16000.0
+2025-07-28 09:42:07,884 - INFO -   [2] OUTPUT DEFAULT
+2025-07-28 09:42:07,884 - INFO -       Name: AirPod Pro
+2025-07-28 09:42:07,884 - INFO -       Max Channels: In=0, Out=2
+2025-07-28 09:42:07,884 - INFO -       Sample Rate: 48000.0
+2025-07-28 09:42:07,884 - INFO -   [3] INPUT 
+2025-07-28 09:42:07,884 - INFO -       Name: iPhone 12Mini Microphone
+2025-07-28 09:42:07,884 - INFO -       Max Channels: In=1, Out=0
+2025-07-28 09:42:07,884 - INFO -       Sample Rate: 48000.0
+2025-07-28 09:42:07,884 - INFO -   [4] INPUT 
+2025-07-28 09:42:07,884 - INFO -       Name: MacBook Pro Microphone
+2025-07-28 09:42:07,884 - INFO -       Max Channels: In=1, Out=0
+2025-07-28 09:42:07,884 - INFO -       Sample Rate: 44100.0
+2025-07-28 09:42:07,884 - INFO -   [5] OUTPUT 
+2025-07-28 09:42:07,884 - INFO -       Name: MacBook Pro Speakers
+2025-07-28 09:42:07,884 - INFO -       Max Channels: In=0, Out=2
+2025-07-28 09:42:07,884 - INFO -       Sample Rate: 48000.0
+2025-07-28 09:42:07,884 - INFO -   [6] OUTPUT 
+2025-07-28 09:42:07,884 - INFO -       Name: TeamViewer MultiOutputDevice
+2025-07-28 09:42:07,884 - INFO -       Max Channels: In=0, Out=2
+2025-07-28 09:42:07,884 - INFO -       Sample Rate: 48000.0
+2025-07-28 09:42:07,884 - INFO - --------------------------------------------------
+2025-07-28 09:42:07,884 - INFO - Default Output Device: AirPod Pro (ID: 2)
+2025-07-28 09:42:07,884 - INFO - 
+2025-07-28 09:42:08,199 - INFO - Audio output initialized on device: AirPod Pro (Device ID: 2)
+2025-07-28 09:42:08,199 - INFO - Simple Audio Server starting at ws://0.0.0.0:8765
+2025-07-28 09:42:08,224 - INFO - Server is ready to accept connections
+2025-07-28 09:42:08,224 - INFO - Waiting for client to connect...
+2025-07-28 09:42:11,300 - INFO - Client connected: ('127.0.0.1', 51404)

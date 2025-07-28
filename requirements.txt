@@ -8,3 +8,9 @@ aiofiles>=23.0.0
 
 # Utility libraries
 numpy>=1.24.0
+
+# Volume control for Windows
+pycaw>=20220416
+
+# Windows service support
+pywin32>=306

@@ -1,7 +1,0 @@
-1. Go lenh "nssm.exe install CameraSpeaker" de khoi tao 1 windown service
-2. Se hien thi len 1 cua so o tab Application (Application path) chon duong dan toi file camera-speaker.exe
-3. O tab I/O chon file service.log de luu lai log cua application (co the tu tao file khac)
-4. Ten service co the dat lai va nhan "Install service"
-5. Mo cmd voi quyen admin
-6. Go lenh "net start CameraSpeaker" hoac ten duoc doi lai o buoc 4
-7. Application duoc on tren port 8765

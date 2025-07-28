@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Audio Server Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .controls {
+            margin: 20px 0;
+            text-align: center;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f1b0b7;
+        }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 20px 0;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .config {
+            margin: 20px 0;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 5px;
+        }
+        .config label {
+            display: inline-block;
+            width: 150px;
+            font-weight: bold;
+        }
+        .config input {
+            width: 200px;
+            padding: 5px;
+            margin: 5px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+        .audio-controls {
+            margin: 20px 0;
+            padding: 15px;
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 5px;
+        }
+        .recording {
+            background: #dc3545 !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebSocket Audio Server Test</h1>
+        
+        <div class="config">
+            <div>
+                <label for="serverUrl">Server URL:</label>
+                <input type="text" id="serverUrl" value="ws://localhost:8765" />
+            </div>
+            <div>
+                <label for="autoReconnect">Auto Reconnect:</label>
+                <input type="checkbox" id="autoReconnect" checked />
+                <span style="margin-left: 10px;">Reconnect Interval:</span>
+                <input type="number" id="reconnectInterval" value="3" min="1" max="30" style="width: 60px;" /> seconds
+            </div>
+            <div>
+                <label for="autoReload">Auto Reload Page:</label>
+                <input type="checkbox" id="autoReload" />
+                <span style="margin-left: 10px;">Reload Interval:</span>
+                <input type="number" id="reloadInterval" value="60" min="10" max="300" style="width: 60px;" /> seconds
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+            <button id="pingBtn" onclick="sendPing()" disabled>Send Ping</button>
+            <button id="reloadBtn" onclick="reloadPage()">Reload Page</button>
+            <button id="clearLogBtn" onclick="clearLog()">Clear Log</button>
+        </div>
+        
+        <div id="status" class="status disconnected">Disconnected</div>
+        
+        <div class="audio-controls">
+            <h3>Audio Controls</h3>
+            <button id="recordBtn" onclick="toggleRecording()" disabled>Start Recording</button>
+            <button id="playTone" onclick="playTestTone()" disabled>Send Test Tone</button>
+            <div style="margin-top: 10px;">
+                <label>Volume: </label>
+                <input type="range" id="volumeSlider" min="0" max="100" value="50" onchange="updateVolume()">
+                <span id="volumeValue">50%</span>
+            </div>
+        </div>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let socket = null;
+        let isRecording = false;
+        let mediaRecorder = null;
+        let audioStream = null;
+        let audioContext = null;
+        let volume = 0.5;
+        let reconnectTimer = null;
+        let reloadTimer = null;
+        let reconnectAttempts = 0;
+        let maxReconnectAttempts = 10;
+
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            log('Log cleared');
+        }
+
+        function reloadPage() {
+            log('Reloading page...');
+            setTimeout(() => location.reload(), 1000);
+        }
+
+        function startAutoReload() {
+            const autoReload = document.getElementById('autoReload').checked;
+            const interval = parseInt(document.getElementById('reloadInterval').value) * 1000;
+
+            if (reloadTimer) {
+                clearInterval(reloadTimer);
+                reloadTimer = null;
+            }
+
+            if (autoReload) {
+                log(`Auto reload enabled - page will reload every ${interval/1000} seconds`);
+                reloadTimer = setInterval(() => {
+                    log('Auto reloading page...');
+                    location.reload();
+                }, interval);
+            }
+        }
+
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const pingBtn = document.getElementById('pingBtn');
+            const recordBtn = document.getElementById('recordBtn');
+            const playToneBtn = document.getElementById('playTone');
+            
+            if (connected) {
+                statusDiv.textContent = 'Connected';
+                statusDiv.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                pingBtn.disabled = false;
+                recordBtn.disabled = false;
+                playToneBtn.disabled = false;
+            } else {
+                statusDiv.textContent = 'Disconnected';
+                statusDiv.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                pingBtn.disabled = true;
+                recordBtn.disabled = true;
+                playToneBtn.disabled = true;
+            }
+        }
+
+        function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            
+            // Clear any existing reconnect timer
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+
+            log(`Attempting to connect to ${serverUrl}... (Attempt ${reconnectAttempts + 1})`);
+            
+            try {
+                socket = new WebSocket(serverUrl);
+                
+                socket.onopen = function(event) {
+                    log('Connected to server');
+                    reconnectAttempts = 0; // Reset counter on successful connection
+                    updateStatus(true);
+                };
+                
+                socket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        log(`Received: ${JSON.stringify(data)}`);
+                    } catch (e) {
+                        log(`Received raw message: ${event.data}`);
+                    }
+                };
+                
+                socket.onclose = function(event) {
+                    log(`Connection closed (code: ${event.code}, reason: ${event.reason})`);
+                    updateStatus(false);
+                    socket = null;
+                    
+                    // Stop recording if active
+                    if (isRecording) {
+                        toggleRecording();
+                    }
+                    
+                    // Auto reconnect if enabled
+                    attemptReconnect();
+                };
+                
+                socket.onerror = function(error) {
+                    log(`WebSocket error: ${error}`);
+                    updateStatus(false);
+                };
+                
+            } catch (error) {
+                log(`Connection error: ${error}`);
+                attemptReconnect();
+            }
+        }
+
+        function attemptReconnect() {
+            const autoReconnect = document.getElementById('autoReconnect').checked;
+            const interval = parseInt(document.getElementById('reconnectInterval').value) * 1000;
+
+            if (autoReconnect && reconnectAttempts < maxReconnectAttempts) {
+                reconnectAttempts++;
+                log(`Auto reconnect in ${interval/1000} seconds... (${reconnectAttempts}/${maxReconnectAttempts})`);
+                
+                reconnectTimer = setTimeout(() => {
+                    connect();
+                }, interval);
+            } else if (reconnectAttempts >= maxReconnectAttempts) {
+                log(`Max reconnect attempts (${maxReconnectAttempts}) reached. Auto reconnect stopped.`);
+            }
+        }
+
+        function disconnect() {
+            if (socket) {
+                log('Manually disconnecting...');
+                
+                // Clear reconnect timer to prevent auto reconnect
+                if (reconnectTimer) {
+                    clearTimeout(reconnectTimer);
+                    reconnectTimer = null;
+                }
+                
+                // Reset reconnect attempts
+                reconnectAttempts = maxReconnectAttempts; // Prevent auto reconnect
+                
+                socket.close();
+            }
+        }
+
+        function sendPing() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const message = { type: "ping" };
+                socket.send(JSON.stringify(message));
+                log('Sent ping');
+            }
+        }
+
+        function updateVolume() {
+            const slider = document.getElementById('volumeSlider');
+            const valueSpan = document.getElementById('volumeValue');
+            volume = slider.value / 100;
+            valueSpan.textContent = slider.value + '%';
+        }
+
+        async function toggleRecording() {
+            const recordBtn = document.getElementById('recordBtn');
+            
+            if (!isRecording) {
+                try {
+                    // Request microphone access
+                    audioStream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            sampleRate: 44100,
+                            channelCount: 1,
+                            echoCancellation: false,
+                            noiseSuppression: false
+                        }
+                    });
+                    
+                    // Create audio context for processing
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 44100
+                    });
+                    
+                    const source = audioContext.createMediaStreamSource(audioStream);
+                    const processor = audioContext.createScriptProcessor(1024, 1, 1);
+                    
+                    processor.onaudioprocess = function(e) {
+                        if (isRecording && socket && socket.readyState === WebSocket.OPEN) {
+                            const inputBuffer = e.inputBuffer.getChannelData(0);
+                            
+                            // Apply volume
+                            const adjustedBuffer = new Float32Array(inputBuffer.length);
+                            for (let i = 0; i < inputBuffer.length; i++) {
+                                adjustedBuffer[i] = inputBuffer[i] * volume;
+                            }
+                            
+                            // Convert to 16-bit PCM
+                            const pcmData = new Int16Array(adjustedBuffer.length);
+                            for (let i = 0; i < adjustedBuffer.length; i++) {
+                                pcmData[i] = Math.max(-32768, Math.min(32767, adjustedBuffer[i] * 32767));
+                            }
+                            
+                            // Convert to base64
+                            const buffer = new ArrayBuffer(pcmData.length * 2);
+                            const view = new DataView(buffer);
+                            for (let i = 0; i < pcmData.length; i++) {
+                                view.setInt16(i * 2, pcmData[i], true); // little endian
+                            }
+                            
+                            const base64Audio = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+                            
+                            // Send to server
+                            const message = {
+                                type: "audio",
+                                data: base64Audio
+                            };
+                            socket.send(JSON.stringify(message));
+                        }
+                    };
+                    
+                    source.connect(processor);
+                    processor.connect(audioContext.destination);
+                    
+                    isRecording = true;
+                    recordBtn.textContent = 'Stop Recording';
+                    recordBtn.className = 'recording';
+                    log('Started recording audio...');
+                    
+                } catch (error) {
+                    log(`Error starting recording: ${error}`);
+                }
+            } else {
+                // Stop recording
+                isRecording = false;
+                recordBtn.textContent = 'Start Recording';
+                recordBtn.className = '';
+                
+                if (audioStream) {
+                    audioStream.getTracks().forEach(track => track.stop());
+                    audioStream = null;
+                }
+                
+                if (audioContext) {
+                    audioContext.close();
+                    audioContext = null;
+                }
+                
+                log('Stopped recording');
+            }
+        }
+
+        function playTestTone() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                log('Generating test tone...');
+                
+                // Generate a 1-second 440Hz sine wave
+                const sampleRate = 44100;
+                const duration = 1; // seconds
+                const frequency = 440; // Hz
+                const samples = sampleRate * duration;
+                const pcmData = new Int16Array(samples);
+                
+                for (let i = 0; i < samples; i++) {
+                    const sample = Math.sin(2 * Math.PI * frequency * i / sampleRate) * volume;
+                    pcmData[i] = Math.max(-32768, Math.min(32767, sample * 32767));
+                }
+                
+                // Convert to base64 and send in chunks
+                const chunkSize = 1024; // Match server's CHUNK size
+                for (let i = 0; i < pcmData.length; i += chunkSize) {
+                    const chunk = pcmData.slice(i, i + chunkSize);
+                    const buffer = new ArrayBuffer(chunk.length * 2);
+                    const view = new DataView(buffer);
+                    
+                    for (let j = 0; j < chunk.length; j++) {
+                        view.setInt16(j * 2, chunk[j], true); // little endian
+                    }
+                    
+                    const base64Audio = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+                    
+                    const message = {
+                        type: "audio",
+                        data: base64Audio
+                    };
+                    
+                    socket.send(JSON.stringify(message));
+                }
+                
+                log('Test tone sent');
+            }
+        }
+
+        // Initialize
+        log('WebSocket Audio Test Client loaded');
+        log('Click Connect to start testing the audio server');
+        
+        // Setup event listeners for config changes
+        document.getElementById('autoReload').addEventListener('change', startAutoReload);
+        document.getElementById('reloadInterval').addEventListener('change', startAutoReload);
+        
+        // Start auto reload if enabled
+        startAutoReload();
+        
+        // Add beforeunload event to cleanup
+        window.addEventListener('beforeunload', function() {
+            if (socket) {
+                socket.close();
+            }
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+            }
+            if (audioContext) {
+                audioContext.close();
+            }
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+            }
+            if (reloadTimer) {
+                clearInterval(reloadTimer);
+            }
+        });
+    </script>
+</body>
+</html>
